@@ -19,8 +19,8 @@ data:
         - JSONPath: .status.conditions[?(@.type=="Ready")].status
           name: Ready
           type: string
-        - JSONPath: .status.conditions[?(@.type=="Ready")].reason
-          name: Reason
+        - JSONPath: .status.conditions[?(@.type=="Ready")].lastUpdatedTime
+          name: LastUpdated
           type: string
         group: toolchain.dev.openshift.com
         names:
@@ -62,6 +62,10 @@ data:
                         lastTransitionTime:
                           description: Last time the condition transit from one status to
                             another.
+                          format: date-time
+                          type: string
+                        lastUpdatedTime:
+                          description: Last time the condition was updated
                           format: date-time
                           type: string
                         message:
@@ -198,6 +202,10 @@ data:
                         lastTransitionTime:
                           description: Last time the condition transit from one status to
                             another.
+                          format: date-time
+                          type: string
+                        lastUpdatedTime:
+                          description: Last time the condition was updated
                           format: date-time
                           type: string
                         message:
@@ -365,6 +373,10 @@ data:
                         lastTransitionTime:
                           description: Last time the condition transit from one status to
                             another.
+                          format: date-time
+                          type: string
+                        lastUpdatedTime:
+                          description: Last time the condition was updated
                           format: date-time
                           type: string
                         message:
