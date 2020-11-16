@@ -6,6 +6,7 @@ import (
 	"reflect"
 
 	toolchainv1alpha1 "github.com/codeready-toolchain/api/pkg/apis/toolchain/v1alpha1"
+	"github.com/codeready-toolchain/member-operator/pkg/che"
 	"github.com/codeready-toolchain/member-operator/pkg/configuration"
 	"github.com/codeready-toolchain/toolchain-common/pkg/condition"
 	commoncontroller "github.com/codeready-toolchain/toolchain-common/pkg/controller"
@@ -153,6 +154,12 @@ func (r *ReconcileUserAccount) Reconcile(request reconcile.Request) (reconcile.R
 			logger.Error(err, "error updating status")
 			return reconcile.Result{}, err
 		}
+
+		// Clean up Che resources by deleting the Che user (required for GDPR and reactivation of users)
+		if err := che.DefaultClient.LookupAndDeleteUser(userAcc.Name); err != nil {
+			return reconcile.Result{}, r.wrapErrorWithStatusUpdate(logger, userAcc, r.setStatusTerminating, err, "failed to delete Che user data")
+		}
+
 		deleted, err := r.deleteIdentityAndUser(logger, userAcc)
 		if err != nil {
 			return reconcile.Result{}, r.wrapErrorWithStatusUpdate(logger, userAcc, r.setStatusTerminating, err, "failed to delete user/identity")
@@ -174,6 +181,13 @@ func (r *ReconcileUserAccount) Reconcile(request reconcile.Request) (reconcile.R
 			logger.Error(err, "error updating status")
 			return reconcile.Result{}, err
 		}
+
+		// Clean up Che resources by deleting the Che user (required for GDPR and reactivation of users)
+		if err := che.DefaultClient.LookupAndDeleteUser(userAcc.Name); err != nil {
+			logger.Error(err, "error deleting Che user")
+			return reconcile.Result{}, err
+		}
+
 		deleted, err := r.deleteIdentityAndUser(logger, userAcc)
 		if err != nil {
 			return reconcile.Result{}, r.wrapErrorWithStatusUpdate(logger, userAcc, r.setStatusDisabling, err, "failed to delete user/identity")
