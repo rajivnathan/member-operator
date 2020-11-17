@@ -49,36 +49,27 @@ func InitDefaultCheClient(cfg *crtConfig.Config, cl client.Client) {
 	}
 }
 
-// LookupAndDeleteUser looks up the Che user with the given username and deletes the user
-func (c *Client) LookupAndDeleteUser(username string) error {
-	// lookup user ID
-	log.Info("Deleting Che user", "username", username)
-
-	userID, err := c.getUserIDByUsername(username)
+// UserExists returns true if the username exists, false if it doesn't and an error if there was problem with the request
+func (c *Client) UserExists(username string) (bool, error) {
+	log.Info("Checking if Che user exists", "username", username)
+	reqData := url.Values{}
+	reqData.Set("name", username)
+	res, err := c.cheRequest(http.MethodGet, cheUserFindPath, reqData)
 	if err != nil {
-		return err
+		return false, err
 	}
-
-	// delete the user
-	return c.deleteUser(userID)
-
-	// res, err := c.cheRequest(http.MethodGet, path.Join(cheUserPath, userID), nil)
-	// if err != nil {
-	// 	return err
-	// }
-	// defer rest.CloseResponse(res)
-	// bodyString := rest.ReadBody(res.Body)
-	// if res.StatusCode != http.StatusOK {
-	// 	err = errors.Errorf("unable to delete Che user, Response status: %s. Response body: %s", res.Status, bodyString)
-	// }
-
-	// log.Info("Body", "value", bodyString)
-
-	// return err
+	defer rest.CloseResponse(res)
+	if res.StatusCode == http.StatusOK {
+		return true, nil
+	} else if res.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+	return false, errors.Errorf("request to find Che user '%s' failed, Response status: '%s'", username, res.Status)
 }
 
-// getUserIDByUsername returns the user ID that maps to the given username
-func (c *Client) getUserIDByUsername(username string) (string, error) {
+// GetUserIDByUsername returns the user ID that maps to the given username
+func (c *Client) GetUserIDByUsername(username string) (string, error) {
+	log.Info("Looking up Che user ID", "username", username)
 	reqData := url.Values{}
 	reqData.Set("name", username)
 	res, err := c.cheRequest(http.MethodGet, cheUserFindPath, reqData)
@@ -88,20 +79,21 @@ func (c *Client) getUserIDByUsername(username string) (string, error) {
 	defer rest.CloseResponse(res)
 	cheUser, err := readCheUser(res)
 	if res.StatusCode != http.StatusOK {
-		err = errors.Errorf("unable to get Che user ID, Response status: %s", res.Status)
+		err = errors.Errorf("unable to get Che user ID for user '%s', Response status: '%s' Body: '%s'", username, res.Status, rest.ReadBody(res.Body))
 	}
 	return cheUser.ID, err
 }
 
-// deleteUser deletes the Che user with the given user ID
-func (c *Client) deleteUser(userID string) error {
+// DeleteUser deletes the Che user with the given user ID
+func (c *Client) DeleteUser(userID string) error {
+	log.Info("Deleting Che user", "userID", userID)
 	res, err := c.cheRequest(http.MethodDelete, path.Join(cheUserPath, userID), nil)
 	if err != nil {
 		return err
 	}
 	defer rest.CloseResponse(res)
 	if res.StatusCode != http.StatusNoContent && res.StatusCode != http.StatusNotFound {
-		err = errors.Errorf("unable to delete Che user with ID %s, Response status: %s", userID, res.Status)
+		err = errors.Errorf("unable to delete Che user with ID '%s', Response status: '%s' Body: '%s'", userID, res.Status, rest.ReadBody(res.Body))
 	}
 	return err
 }
@@ -158,6 +150,7 @@ func getRouteURL(cl client.Client, namespace, name string) (string, error) {
 	return fmt.Sprintf("%s://%s/%s", scheme, route.Spec.Host, route.Spec.Path), nil
 }
 
+// CheUser holds the data retrieved from the Che user API
 type CheUser struct {
 	Name string `json:"name"`
 	ID   string `json:"id"`

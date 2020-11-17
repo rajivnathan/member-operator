@@ -156,7 +156,7 @@ func (r *ReconcileUserAccount) Reconcile(request reconcile.Request) (reconcile.R
 		}
 
 		// Clean up Che resources by deleting the Che user (required for GDPR and reactivation of users)
-		if err := che.DefaultClient.LookupAndDeleteUser(userAcc.Name); err != nil {
+		if err := r.lookupAndDeleteCheUser(userAcc); err != nil {
 			return reconcile.Result{}, r.wrapErrorWithStatusUpdate(logger, userAcc, r.setStatusTerminating, err, "failed to delete Che user data")
 		}
 
@@ -183,9 +183,8 @@ func (r *ReconcileUserAccount) Reconcile(request reconcile.Request) (reconcile.R
 		}
 
 		// Clean up Che resources by deleting the Che user (required for GDPR and reactivation of users)
-		if err := che.DefaultClient.LookupAndDeleteUser(userAcc.Name); err != nil {
-			logger.Error(err, "error deleting Che user")
-			return reconcile.Result{}, err
+		if err := r.lookupAndDeleteCheUser(userAcc); err != nil {
+			return reconcile.Result{}, r.wrapErrorWithStatusUpdate(logger, userAcc, r.setStatusDisabling, err, "failed to delete Che user data")
 		}
 
 		deleted, err := r.deleteIdentityAndUser(logger, userAcc)
@@ -570,6 +569,34 @@ func (r *ReconcileUserAccount) setStatusTerminating(userAcc *toolchainv1alpha1.U
 		})
 }
 
+func (r *ReconcileUserAccount) setStatusCheUserDeletionInProgress(userAcc *toolchainv1alpha1.UserAccount, message string) error {
+	return r.updateStatusConditions(
+		userAcc,
+		toolchainv1alpha1.Condition{
+			Type:    toolchainv1alpha1.UserAccountCheCleanup,
+			Status:  corev1.ConditionFalse,
+			Reason:  toolchainv1alpha1.UserAccountDeletingCheDataReason,
+			Message: message,
+		})
+}
+
+func (r *ReconcileUserAccount) removeStatusCondition(userAcc *toolchainv1alpha1.UserAccount, cType toolchainv1alpha1.ConditionType) error {
+	var updated bool
+	conditions := userAcc.Status.Conditions
+	for i := len(userAcc.Status.Conditions) - 1; i >= 0; i-- {
+		if conditions[i].Type == cType {
+			conditions = append(conditions[:i], conditions[i+1:]...)
+			updated = true
+		}
+	}
+	if !updated {
+		// Nothing changed
+		return nil
+	}
+	userAcc.Status.Conditions = conditions
+	return r.client.Status().Update(context.TODO(), userAcc)
+}
+
 // updateStatusConditions updates user account status conditions with the new conditions
 func (r *ReconcileUserAccount) updateStatusConditions(userAcc *toolchainv1alpha1.UserAccount, newConditions ...toolchainv1alpha1.Condition) error {
 	var updated bool
@@ -621,4 +648,58 @@ func newNSTemplateSet(userAcc *toolchainv1alpha1.UserAccount) *toolchainv1alpha1
 // ToIdentityName converts the given `userID` into an identity
 func ToIdentityName(userID string, identityProvider IdentityProvider) string {
 	return fmt.Sprintf("%s:%s", identityProvider.GetIdP(), userID)
+}
+
+func (r *ReconcileUserAccount) lookupAndDeleteCheUser(userAcc *toolchainv1alpha1.UserAccount) error {
+
+	var userExists bool
+
+	userExists, err := che.DefaultClient.UserExists(userAcc.Name)
+	fmt.Printf("User exists: %t\n", userExists)
+	if err != nil {
+		return err
+	}
+
+	// If the user doesn't exist and there's no deletion in progress then there's nothing left to do.
+	// We need to check whether the deletion is in progress because in some cases the user could be reported as non-existent while the deletion is still in progress.
+	if !userExists && !condition.HasConditionReason(userAcc.Status.Conditions, toolchainv1alpha1.UserAccountCheCleanup, toolchainv1alpha1.UserAccountDeletingCheDataReason) {
+		return nil
+	}
+
+	var cheUserID string
+
+	// Get the user ID from the status condition if it's there
+	if condition.HasConditionReason(userAcc.Status.Conditions, toolchainv1alpha1.UserAccountCheCleanup, toolchainv1alpha1.UserAccountDeletingCheDataReason) {
+		cond, found := condition.FindConditionByType(userAcc.Status.Conditions, toolchainv1alpha1.UserAccountCheCleanup)
+		fmt.Printf("Condition found: %t\n", found)
+		if found {
+			cheUserID = cond.Message
+			fmt.Printf("cheUserID set: %s\n", cheUserID)
+		}
+	}
+	fmt.Printf("cheUserID: %s\n", cheUserID)
+
+	// If the user ID is not in the status then look it up and set it in the status
+	if cheUserID == "" {
+		cheUserID, err := che.DefaultClient.GetUserIDByUsername(userAcc.Name)
+		if err != nil {
+			return err
+		}
+
+		// Set the Che user deletion status (store the Che user ID in the status for subsequent retries if needed)
+		// This is required because the deletion API will return an error until the user is successfully removed.
+		if !condition.HasConditionReason(userAcc.Status.Conditions, toolchainv1alpha1.UserAccountCheCleanup, toolchainv1alpha1.UserAccountDeletingCheDataReason) {
+			if err := r.setStatusCheUserDeletionInProgress(userAcc, cheUserID); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Delete the Che user. It is common for this call to return an error multiple times before succeeding
+	if err := che.DefaultClient.DeleteUser(cheUserID); err != nil {
+		return err
+	}
+
+	// Remove the Che user deletion condition when done
+	return r.removeStatusCondition(userAcc, toolchainv1alpha1.UserAccountCheCleanup)
 }
