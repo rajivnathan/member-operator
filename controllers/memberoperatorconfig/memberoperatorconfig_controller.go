@@ -2,10 +2,13 @@ package memberoperatorconfig
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/go-logr/logr"
+	errs "github.com/pkg/errors"
 
 	toolchainv1alpha1 "github.com/codeready-toolchain/api/api/v1alpha1"
+	"github.com/codeready-toolchain/member-operator/pkg/autoscaler"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -100,24 +103,30 @@ func (r *Reconciler) Reconcile(request reconcile.Request) (reconcile.Result, err
 
 	updateConfig(memberconfig, allSecrets)
 
-	r.postUpdateActions()
-
-	return reconcile.Result{}, nil
+	return reconcile.Result{}, r.autoscalerDeploy(request.Namespace)
 }
 
-func RegisterPostUpdateAction(name string, action func(logr.Logger) error) {
-	t := PostUpdateAction{
-		name:   name,
-		action: action,
+func (r *Reconciler) autoscalerDeploy(namespace string) error {
+	crtConfig, err := GetConfig(r.Client, namespace)
+	if err != nil {
+		return fmt.Errorf("unable to auto deploy or delete autoscaler")
 	}
-	actions = append(actions, t)
-}
-
-func (r *Reconciler) postUpdateActions() {
-	for _, t := range actions {
-		r.Log.Info("executing post configuration update action", "name", t.name)
-		if err := t.action(r.Log); err != nil {
-			r.Log.Error(err, "post configuration update action failed", "name", t.name)
+	if crtConfig.Autoscaler().Deploy() {
+		r.Log.Info("(Re)Deploying autoscaling buffer")
+		if err := autoscaler.Deploy(r.Client, r.Scheme, namespace, crtConfig.Autoscaler().BufferMemory(), crtConfig.Autoscaler().BufferReplicas()); err != nil {
+			return errs.Wrap(err, "cannot deploy autoscaling buffer")
+		}
+		r.Log.Info("(Re)Deployed autoscaling buffer")
+	} else {
+		deleted, err := autoscaler.Delete(r.Client, r.Scheme, namespace)
+		if err != nil {
+			return errs.Wrap(err, "cannot delete previously deployed autoscaling buffer")
+		}
+		if deleted {
+			r.Log.Info("Deleted previously deployed autoscaling buffer")
+		} else {
+			r.Log.Info("Skipping deployment of autoscaling buffer")
 		}
 	}
+	return nil
 }

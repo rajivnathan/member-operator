@@ -17,7 +17,6 @@ import (
 	"github.com/codeready-toolchain/member-operator/controllers/useraccount"
 	"github.com/codeready-toolchain/member-operator/controllers/useraccountstatus"
 	"github.com/codeready-toolchain/member-operator/pkg/apis"
-	"github.com/codeready-toolchain/member-operator/pkg/autoscaler"
 	"github.com/codeready-toolchain/member-operator/pkg/che"
 	"github.com/codeready-toolchain/member-operator/pkg/webhook/deploy"
 	"github.com/codeready-toolchain/member-operator/version"
@@ -259,8 +258,6 @@ func main() {
 		} else {
 			setupLog.Info("Skipping deployment of users' pods webhook")
 		}
-
-		autoscaler.RegisterAutoscalerDeploy(mgr.GetClient(), mgr.GetScheme(), namespace)
 
 		setupLog.Info("Starting ToolchainCluster health checks.")
 		toolchaincluster.StartHealthChecks(mgr, namespace, stopChannel, crtConfig.ToolchainCluster().HealthCheckPeriod())

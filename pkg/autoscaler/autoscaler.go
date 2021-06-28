@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/codeready-toolchain/member-operator/controllers/memberoperatorconfig"
 	applycl "github.com/codeready-toolchain/toolchain-common/pkg/client"
 	"github.com/codeready-toolchain/toolchain-common/pkg/template"
-	"github.com/go-logr/logr"
 
 	tmplv1 "github.com/openshift/api/template/v1"
 	errs "github.com/pkg/errors"
@@ -78,33 +76,4 @@ func getTemplateObjects(s *runtime.Scheme, namespace, requestsMemory string, rep
 		"MEMORY":    requestsMemory,
 		"REPLICAS":  fmt.Sprintf("%d", replicas),
 	})
-}
-
-func RegisterAutoscalerDeploy(cl client.Client, scheme *runtime.Scheme, namespace string) {
-	autoscalerDeploy := func(logger logr.Logger) error {
-		crtConfig, err := memberoperatorconfig.GetConfig(cl, namespace)
-		if err != nil {
-			return fmt.Errorf("unable to auto deploy or delete autoscaler")
-		}
-		if crtConfig.Autoscaler().Deploy() {
-			logger.Info("(Re)Deploying autoscaling buffer")
-			if err := Deploy(cl, scheme, namespace, crtConfig.Autoscaler().BufferMemory(), crtConfig.Autoscaler().BufferReplicas()); err != nil {
-				return errs.Wrap(err, "cannot deploy autoscaling buffer")
-			}
-			logger.Info("(Re)Deployed autoscaling buffer")
-		} else {
-			deleted, err := Delete(cl, scheme, namespace)
-			if err != nil {
-				return errs.Wrap(err, "cannot delete previously deployed autoscaling buffer")
-			}
-			if deleted {
-				logger.Info("Deleted previously deployed autoscaling buffer")
-			} else {
-				logger.Info("Skipping deployment of autoscaling buffer")
-			}
-		}
-		return nil
-	}
-
-	memberoperatorconfig.RegisterPostUpdateAction("autoscaler-deploy", autoscalerDeploy)
 }
