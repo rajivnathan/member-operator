@@ -9,6 +9,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -17,6 +18,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
+
+type PostUpdateAction struct {
+	name   string
+	action func(logr.Logger) error
+}
+
+var actions []PostUpdateAction
 
 // add adds a new Controller to mgr with r as the reconcile.Reconciler
 func add(mgr manager.Manager, r reconcile.Reconciler) error {
@@ -54,6 +62,7 @@ func (r *Reconciler) SetupWithManager(mgr manager.Manager) error {
 type Reconciler struct {
 	Client client.Client
 	Log    logr.Logger
+	Scheme *runtime.Scheme
 }
 
 //+kubebuilder:rbac:groups=toolchain.dev.openshift.com,resources=memberoperatorconfigs,verbs=get;list;watch;create;update;patch;delete
@@ -90,5 +99,25 @@ func (r *Reconciler) Reconcile(request reconcile.Request) (reconcile.Result, err
 	}
 
 	updateConfig(memberconfig, allSecrets)
+
+	r.postUpdateActions()
+
 	return reconcile.Result{}, nil
+}
+
+func RegisterPostUpdateAction(name string, action func(logr.Logger) error) {
+	t := PostUpdateAction{
+		name:   name,
+		action: action,
+	}
+	actions = append(actions, t)
+}
+
+func (r *Reconciler) postUpdateActions() {
+	for _, t := range actions {
+		r.Log.Info("executing post configuration update action", "name", t.name)
+		if err := t.action(r.Log); err != nil {
+			r.Log.Error(err, "post configuration update action failed", "name", t.name)
+		}
+	}
 }
