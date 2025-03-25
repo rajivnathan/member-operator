@@ -233,6 +233,7 @@ func TestEnsureIdling(t *testing.T) {
 			assert.Equal(t, 0, int(res.RequeueAfter)) // pods running for too long should be killed immediately
 
 			t.Run("Second Reconcile. Delete long running and crashlooping pods.", func(t *testing.T) {
+				t.Log("Second Reconcile started")
 				//when
 				res, err := reconciler.Reconcile(context.TODO(), req)
 
@@ -626,9 +627,9 @@ func TestEnsureIdlingFailed(t *testing.T) {
 			assertCanNotUpdateObject := func(inaccessible runtime.Object, errMsg string) {
 				// given
 				reconciler, req, cl, allCl, dynamicCl := prepareReconcileWithPodsRunningTooLong(t, idler)
-				gock.Off()
+				// gock.Off()
 				// mock stop call
-				mockStopVMCalls(".*", ".*", http.StatusInternalServerError)
+				// mockStopVMCalls(".*", ".*", http.StatusInternalServerError)
 
 				update := allCl.MockUpdate
 				defer func() { allCl.MockUpdate = update }()
@@ -1325,8 +1326,28 @@ func preparePayloads(t *testing.T, r *Reconciler, namespace, namePrefix string, 
 	_, err = r.DynamicClient.Resource(vmGVR).Namespace(namespace).Create(context.TODO(), vm, metav1.CreateOptions{})
 	require.NoError(t, err)
 
-	// mock stop call
-	stopCallCounter := mockStopVMCalls(namespace, vm.GetName(), http.StatusAccepted)
+	// mock VM stop call
+	// stopCallCounter := mockStopVMCalls(namespace, vm.GetName(), http.StatusAccepted)
+	stopCallCounter := new(int)
+	r.DynamicClient.(*fakedynamic.FakeDynamicClient).PrependReactor("update", "virtualmachines/stop", func(action clienttest.Action) (handled bool, ret runtime.Object, err error) {
+		runtimeObj := action.(clienttest.UpdateAction).GetObject()
+		// convert the runtime.Object to unstructured.Unstructured
+		objMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(runtimeObj)
+		if err != nil {
+			return false, nil, err
+		}
+		unstructuredObj := unstructured.Unstructured{objMap}
+		// if unstructuredObj.GetName() == "todelete-alex-stage-virtualmachine" {
+		// 	*stopCallCounter++
+		// }
+		// if runtimeObj
+		if action.GetNamespace() == namespace {
+			t.Logf("Incrementing counter for namespace %s and object %+v", namespace, unstructuredObj.GetName())
+			*stopCallCounter++
+			t.Logf("Incremented counter %d", *stopCallCounter)
+		}
+		return true, nil, nil
+	})
 
 	// VirtualMachineInstance
 	vmstartTime := metav1.NewTime(startTimes.vmStartTime)
@@ -1393,24 +1414,24 @@ func preparePayloads(t *testing.T, r *Reconciler, namespace, namePrefix string, 
 	}
 }
 
-func mockStopVMCalls(namespace, name string, reply int) *int {
-	expPath := fmt.Sprintf("/apis/subresources.kubevirt.io/v1/namespaces/%s/virtualmachines/%s/stop", namespace, name)
-	stopCallCounter := new(int)
-	gock.New(apiEndpoint).
-		Put(expPath).
-		Persist().
-		AddMatcher(func(request *http.Request, request2 *gock.Request) (bool, error) {
-			// the matcher function is called before checking the path,
-			// so we need to verify that it's really the same VM
-			if request.URL.Path == expPath {
-				*stopCallCounter++
-			}
-			return true, nil
-		}).
-		Reply(reply).
-		BodyString("")
-	return stopCallCounter
-}
+// func mockStopVMCalls(namespace, name string, reply int) *int {
+// expPath := fmt.Sprintf("/apis/subresources.kubevirt.io/v1/namespaces/%s/virtualmachines/%s/stop", namespace, name)
+// stopCallCounter := new(int)
+// gock.New(apiEndpoint).
+// 	Put(expPath).
+// 	Persist().
+// 	AddMatcher(func(request *http.Request, request2 *gock.Request) (bool, error) {
+// 		// the matcher function is called before checking the path,
+// 		// so we need to verify that it's really the same VM
+// 		if request.URL.Path == expPath {
+// 			*stopCallCounter++
+// 		}
+// 		return true, nil
+// 	}).
+// 	Reply(reply).
+// 	BodyString("")
+// 	return stopCallCounter
+// }
 
 func preparePayloadsSinglePod(t *testing.T, r *Reconciler, namespace, namePrefix string, startTime time.Time, conditions ...corev1.PodCondition) payloads {
 	sTime := metav1.NewTime(startTime)

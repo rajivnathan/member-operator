@@ -209,15 +209,12 @@ func main() {
 
 	restClient, err := newRestClient(cfg)
 	if err != nil {
-		setupLog.Error(err, "unable to create scales client")
+		setupLog.Error(err, "unable to create rest client")
 		os.Exit(1)
 	}
 
-	dynamicClient, err := dynamic.NewForConfig(cfg)
-	if err != nil {
-		setupLog.Error(err, "unable to create dynamic client")
-		os.Exit(1)
-	}
+	// dynamicClient, err := dynamic.NewForConfig(cfg)
+	dynamicClient := dynamic.New(restClient)
 
 	// Setup all Controllers
 	if err = (&toolchainclusterresources.Reconciler{

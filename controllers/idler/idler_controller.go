@@ -148,6 +148,7 @@ func (r *Reconciler) ensureIdling(ctx context.Context, idler *toolchainv1alpha1.
 		if isOwnedByVM(pod.ObjectMeta) {
 			// use 1/12th of the timeout for VMs to have more aggressive idling to decrease
 			// the infra costs because VMs consume much more resources
+			// timeoutSeconds = 60
 			timeoutSeconds = timeoutSeconds / 12
 		}
 		if trackedPod := findPodByName(idler, pod.Name); trackedPod != nil {
@@ -616,19 +617,17 @@ func (r *Reconciler) stopVirtualMachine(ctx context.Context, namespace string, o
 		return "", "", false, err
 	}
 
-	err = r.RestClient.Put().
-		AbsPath(fmt.Sprintf(vmSubresourceURLFmt, "v1")).
-		Namespace(vm.GetNamespace()).
-		Resource("virtualmachines").
-		Name(vm.GetName()).
-		SubResource("stop").
-		Do(ctx).
-		Error()
+	// stop the virtualmachine via its stop subresource
+	vmName := vm.GetName()
+	_, err = r.DynamicClient.
+		Resource(schema.GroupVersionResource{Group: "subresources.kubevirt.io", Version: "v1", Resource: "virtualmachines"}).
+		Namespace(namespace).
+		Update(ctx, vm, metav1.UpdateOptions{}, "stop")
 	if err != nil {
 		return "", "", false, err
 	}
 
-	logger.Info("VirtualMachine stopped", "name", vm.GetName())
+	logger.Info("VirtualMachine stopped", "name", vmName)
 	return vm.GetKind(), vm.GetName(), true, nil
 }
 
