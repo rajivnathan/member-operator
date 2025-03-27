@@ -325,15 +325,12 @@ func main() {
 }
 
 func newDynamicClient(config *rest.Config) (*dynamic.DynamicClient, error) {
-	restCfg := rest.CopyConfig(config)
-	// Set AcceptContentTypes to "application/json, */*"" so that the client will accept non-JSON responses which is required for some APIs. See the comment regarding the VM stop API below.
-	restCfg.AcceptContentTypes = "application/json, */*"
-	httpClient, err := rest.HTTPClientFor(restCfg)
+	httpClient, err := rest.HTTPClientFor(config)
 	if err != nil {
 		return nil, err
 	}
 
-	restClient, err := rest.RESTClientForConfigAndClient(restCfg, httpClient)
+	restClient, err := rest.RESTClientForConfigAndClient(config, httpClient)
 	if err != nil {
 		return nil, err
 	}
